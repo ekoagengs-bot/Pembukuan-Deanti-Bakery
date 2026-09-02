@@ -1,4 +1,4 @@
-const CACHE_NAME = 'deanti-bakery-pro-v1';
+const CACHE_NAME = 'deanti-bakery-pro-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const APP_SHELL = [
   './receipt.js',
   './photos.js',
   './pro.js',
+  './product-fix.js',
   './manifest.json',
   './icon.svg'
 ];
