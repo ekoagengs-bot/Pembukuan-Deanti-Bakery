@@ -1,15 +1,15 @@
 (() => {
   const LOCAL_KEY = 'deanti_bakery_v2';
   const API_KEY = 'deanti_bakery_api_url';
-
   const apiUrl = () => localStorage.getItem(API_KEY) || '';
+
   const toast = msg => {
     if (typeof window.toast === 'function') return window.toast(msg);
     const el = document.getElementById('toast');
     if (!el) return;
     el.textContent = msg;
     el.classList.add('show');
-    setTimeout(() => el.classList.remove('show'), 2200);
+    setTimeout(() => el.classList.remove('show'), 2500);
   };
 
   const compressImage = file => new Promise((resolve, reject) => {
@@ -41,6 +41,7 @@
   });
 
   const fileToBase64 = file => new Promise((resolve, reject) => {
+    if (!file) return resolve('');
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
     reader.onerror = () => reject(new Error('Gagal membaca foto'));
@@ -55,20 +56,17 @@
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action, ...data })
     });
+    const text = await response.text();
+    let result;
+    try { result = JSON.parse(text); } catch (_) { throw new Error('Respons API bukan JSON. Periksa deployment Google Apps Script.'); }
     if (!response.ok) throw new Error('Server API tidak merespons (' + response.status + ')');
-    const result = await response.json();
     if (!result.ok) throw new Error(result.error || 'API gagal menyimpan data');
     return result.data;
   };
 
-  const getBootstrap = async () => {
-    const url = apiUrl();
-    if (!url) return null;
-    const response = await fetch(url + '?action=bootstrap&_=' + Date.now(), { cache: 'no-store' });
-    if (!response.ok) throw new Error('Gagal mengambil data terbaru');
-    const result = await response.json();
-    if (!result.ok) throw new Error(result.error || 'Gagal mengambil data');
-    return result.data;
+  const localDb = () => {
+    try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"products":[],"transactions":[],"cashflows":[]}'); }
+    catch (_) { return { products: [], transactions: [], cashflows: [] }; }
   };
 
   function preview(file) {
@@ -79,14 +77,20 @@
     box.style.position = 'relative';
   }
 
-  function localDb() {
-    try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{"products":[],"transactions":[],"cashflows":[]}'); }
-    catch (_) { return { products: [], transactions: [], cashflows: [] }; }
+  function showExistingPhoto(url) {
+    const box = document.getElementById('productPhotoPreview');
+    if (!box) return;
+    if (!url) {
+      box.innerHTML = '<div class="photo-empty">🍞</div><span>Belum ada foto</span>';
+      return;
+    }
+    box.innerHTML = `<img src="${String(url).replace(/"/g,'&quot;')}" alt="Foto produk" style="width:100%;height:100%;object-fit:cover;border-radius:10px" onerror="this.style.display='none'">`;
+    box.style.position = 'relative';
   }
 
   async function saveProduct(e) {
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
     const form = e.currentTarget;
     if (form.dataset.saving === '1') return;
 
@@ -98,12 +102,12 @@
     const oldId = document.getElementById('productId')?.value.trim() || '';
     const input = document.getElementById('productPhotoInput');
     const file = input?.files?.[0] || null;
+    const id = oldId || ('prd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
 
     if (!name) return toast('Nama produk wajib diisi');
     if (!category) return toast('Kategori wajib diisi');
-    if (price < 0 || cost < 0 || stock < 0) return toast('Harga, HPP, dan stok tidak boleh negatif');
+    if (![price,cost,stock].every(Number.isFinite) || price < 0 || cost < 0 || stock < 0) return toast('Harga, HPP, dan stok tidak valid');
 
-    const id = oldId || ('prd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7));
     const product = { id, name, category, price, cost, stock };
     const submit = form.querySelector('button[type="submit"]');
 
@@ -112,23 +116,32 @@
       if (submit) { submit.disabled = true; submit.textContent = file ? 'Menyimpan & upload foto...' : 'Menyimpan...'; }
 
       if (apiUrl()) {
-        await post('saveProduct', { product });
+        const fresh = await post('saveProduct', { product });
+        const saved = Array.isArray(fresh?.products) ? fresh.products.find(p => String(p.id) === String(id)) : null;
+        if (!saved) throw new Error('Produk tidak dikembalikan oleh server. Backend Google Apps Script perlu di-update/re-deploy.');
+
         if (file) {
           const compressed = await compressImage(file);
           const base64 = await fileToBase64(compressed);
-          await post('uploadProductPhoto', {
+          const photoResult = await post('uploadProductPhoto', {
             productId: id,
             base64,
             mimeType: 'image/jpeg',
             fileName: (name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'produk') + '-' + id + '.jpg'
           });
+          if (!photoResult?.photoUrl) throw new Error('Foto berhasil diproses tetapi URL foto tidak diterima server.');
+          const afterPhoto = await post('saveProduct', { product: { ...product, photoUrl: photoResult.photoUrl } });
+          localStorage.setItem(LOCAL_KEY, JSON.stringify(afterPhoto));
+          if (typeof window.db !== 'undefined') window.db = afterPhoto;
+        } else {
+          localStorage.setItem(LOCAL_KEY, JSON.stringify(fresh));
+          if (typeof window.db !== 'undefined') window.db = fresh;
         }
-        const fresh = await getBootstrap();
-        if (fresh) localStorage.setItem(LOCAL_KEY, JSON.stringify(fresh));
+
         document.getElementById('modal')?.classList.add('hidden');
         if (input) input.value = '';
+        if (typeof window.renderAll === 'function') window.renderAll();
         toast(oldId ? 'Produk berhasil diperbarui' : 'Produk berhasil ditambahkan');
-        setTimeout(() => location.reload(), 250);
       } else {
         const db = localDb();
         db.products = Array.isArray(db.products) ? db.products : [];
@@ -144,8 +157,8 @@
         localStorage.setItem(LOCAL_KEY, JSON.stringify(db));
         document.getElementById('modal')?.classList.add('hidden');
         if (input) input.value = '';
-        toast(oldId ? 'Produk berhasil diperbarui' : 'Produk berhasil ditambahkan');
-        setTimeout(() => location.reload(), 250);
+        if (typeof window.renderAll === 'function') window.renderAll();
+        toast(oldId ? 'Produk berhasil diperbarui (lokal)' : 'Produk berhasil ditambahkan (lokal)');
       }
     } catch (err) {
       console.error('Product save error:', err);
@@ -158,13 +171,14 @@
 
   function init() {
     const form = document.getElementById('productForm');
-    if (!form || form.dataset.productFixV2 === '1') return;
-    form.dataset.productFixV2 = '1';
+    if (!form || form.dataset.productFixV3 === '1') return;
+    form.dataset.productFixV3 = '1';
     form.addEventListener('submit', saveProduct, true);
     const input = document.getElementById('productPhotoInput');
     input?.addEventListener('change', () => preview(input.files?.[0]));
   }
 
+  window.showExistingProductPhoto = showExistingPhoto;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
