@@ -1,6 +1,6 @@
 # Deanti Bakery — Kasir & Pembukuan
 
-Aplikasi web sederhana untuk operasional Deanti Bakery.
+Aplikasi web kasir dan pembukuan untuk operasional Deanti Bakery.
 
 ## Fitur
 - Dashboard omzet, laba kotor, pengeluaran, dan nilai stok
@@ -12,12 +12,24 @@ Aplikasi web sederhana untuk operasional Deanti Bakery.
 - Grafik omzet 7 hari
 - Export backup data JSON
 - Responsive untuk desktop dan Android
+- Database online Google Sheets melalui Google Apps Script
+- Fallback localStorage saat database online belum dikonfigurasi
 
-## Penyimpanan
-Versi awal menggunakan `localStorage` browser. Artinya data tersimpan pada perangkat/browser yang digunakan dan belum menjadi database online bersama.
+## Database Google Sheets
+Backend tersedia di `google-apps-script/Code.gs`.
+Panduan instalasi ada di `google-apps-script/SETUP.md`.
+
+Alur koneksi:
+`Web App GitHub Pages → Google Apps Script Web App → Google Sheets`
+
+Sheet yang digunakan:
+- `Produk`
+- `Transaksi`
+- `DetailTransaksi`
+- `Kas`
+- `Pengaturan`
 
 ## Menjalankan
-Buka `index.html` pada browser. Untuk publikasi paling mudah, aktifkan **GitHub Pages** pada repository ini melalui Settings → Pages → Deploy from branch → `main` → `/ (root)`.
+Buka `index.html` untuk uji lokal. Workflow GitHub Pages juga sudah tersedia di `.github/workflows/pages.yml`.
 
-## Pengembangan lanjutan
-Untuk kebutuhan usaha multi-perangkat, tahap berikutnya sebaiknya memakai Google Sheets/Firebase/Supabase sebagai database online, dilengkapi login pengguna, sinkronisasi, cetak struk, dan manajemen kasir.
+Setelah GitHub Pages aktif, buka menu **Pengaturan** di aplikasi dan tempel URL Web App Google Apps Script yang berakhir `/exec`, kemudian klik **Simpan & Tes Koneksi**.
