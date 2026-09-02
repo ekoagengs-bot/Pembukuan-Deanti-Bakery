@@ -65,43 +65,44 @@
 
     const id = oldId || (typeof window.uid === 'function' ? window.uid() : 'prd-' + Date.now());
     const product = { id, name, category, price, cost, stock };
-    if (file) product.photoUrl = '';
 
     try {
-      if (btn) { btn.dataset.saving = '1'; btn.disabled = true; btn.textContent = file ? 'Mengunggah foto...' : 'Menyimpan...'; }
+      if (btn) { btn.dataset.saving = '1'; btn.disabled = true; btn.textContent = file ? 'Menyimpan & mengunggah...' : 'Menyimpan...'; }
 
-      let result;
       if (typeof window.apiUrl === 'function' && window.apiUrl()) {
-        result = await window.apiPost('saveProduct', { product });
-        window.db = window.normalizeDb(result);
+        // Save the product first so the Drive upload has a valid product ID.
+        await window.apiPost('saveProduct', { product });
 
         if (file) {
           const compressed = await compressImage(file);
           const base64 = await fileToBase64(compressed);
-          const upload = await window.apiPost('uploadProductPhoto', {
+          await window.apiPost('uploadProductPhoto', {
             productId: id,
             base64,
             mimeType: 'image/jpeg',
             fileName: (name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'produk') + '-' + id + '.jpg'
           });
-          window.db = window.normalizeDb(upload?.products ? upload : window.db);
-          const p = window.db.products.find(x => String(x.id) === String(id));
-          if (p && upload?.photoUrl) p.photoUrl = upload.photoUrl;
-          localStorage.setItem('deanti_bakery_v2', JSON.stringify(window.db));
         }
-        window.setStatus?.(true);
+
+        // Let the original app.js update its lexical `db` variable safely.
+        if (typeof window.syncFromSheets === 'function') await window.syncFromSheets();
+        if (typeof window.setStatus === 'function') window.setStatus(true);
       } else {
-        if (!window.db) window.db = { products: [], transactions: [], cashflows: [] };
-        const idx = window.db.products.findIndex(p => String(p.id) === String(id));
-        const old = idx >= 0 ? window.db.products[idx] : {};
+        // Local/offline fallback. app.js keeps db in a module-level lexical variable,
+        // so use its existing localSave path only when the API is unavailable.
+        const local = JSON.parse(localStorage.getItem('deanti_bakery_v2') || '{"products":[],"transactions":[],"cashflows":[]}');
+        local.products = Array.isArray(local.products) ? local.products : [];
+        const idx = local.products.findIndex(p => String(p.id) === String(id));
+        const old = idx >= 0 ? local.products[idx] : {};
         const saved = { ...old, ...product };
-        if (idx >= 0) window.db.products[idx] = saved; else window.db.products.push(saved);
-        localStorage.setItem('deanti_bakery_v2', JSON.stringify(window.db));
+        if (idx >= 0) local.products[idx] = saved; else local.products.push(saved);
+        localStorage.setItem('deanti_bakery_v2', JSON.stringify(local));
+        if (typeof window.syncFromSheets === 'function') window.syncFromSheets();
       }
 
-      if (typeof window.renderAll === 'function') window.renderAll();
       document.getElementById('modal')?.classList.add('hidden');
-      photoInput.value = '';
+      if (photoInput) photoInput.value = '';
+      if (typeof window.renderAll === 'function') window.renderAll();
       window.toast?.(oldId ? 'Produk berhasil diperbarui' : 'Produk berhasil ditambahkan');
     } catch (err) {
       console.error('Product save error:', err);
