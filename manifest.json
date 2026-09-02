@@ -1,0 +1,16 @@
+{
+  "name": "Deanti Bakery — Kasir & Pembukuan",
+  "short_name": "Deanti Bakery",
+  "description": "Aplikasi kasir, stok dan pembukuan Deanti Bakery",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f5f7fb",
+  "theme_color": "#23170f",
+  "lang": "id-ID",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    {"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
