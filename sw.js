@@ -1,4 +1,4 @@
-const CACHE_NAME = 'deanti-bakery-pro-v3';
+const CACHE_NAME = 'deanti-bakery-pro-v4';
 const APP_SHELL = [
   './',
   './index.html',
