@@ -1,5 +1,5 @@
 # Deanti Bakery — GitHub Pages deployment
-name: Deploy static content to Pages
+name: Deploy Deanti Bakery to Pages
 
 on:
   push:
@@ -12,8 +12,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: deanti-bakery-pages
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -30,11 +30,11 @@ jobs:
         with:
           enablement: true
 
-      - name: Upload artifact
+      - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy site
         id: deployment
         uses: actions/deploy-pages@v4
