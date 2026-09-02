@@ -1,21 +1,23 @@
 const SPREADSHEET_ID = '1PVBhZn2xhNGitRgjHCo5x3OUX0_DKsx1ZrS2KeN7CAQ';
 const SHEETS = ['Produk','Transaksi','DetailTransaksi','Kas','Pengaturan'];
+const PRODUCT_IMAGE_FOLDER = 'Deanti Bakery - Foto Produk';
+
+const HEADERS = {
+  'Produk':['id','name','category','price','cost','stock','updatedAt','photoUrl'],
+  'Transaksi':['id','no','date','time','method','discount','total','createdAt'],
+  'DetailTransaksi':['transactionId','productId','name','price','cost','qty','subtotal'],
+  'Kas':['id','date','time','type','category','description','amount','reference'],
+  'Pengaturan':['key','value']
+};
 
 function ss_(){ return SpreadsheetApp.openById(SPREADSHEET_ID); }
 
 function setupDatabase(){
   const ss=ss_();
-  const headers={
-    'Produk':['id','name','category','price','cost','stock','updatedAt'],
-    'Transaksi':['id','no','date','time','method','discount','total','createdAt'],
-    'DetailTransaksi':['transactionId','productId','name','price','cost','qty','subtotal'],
-    'Kas':['id','date','time','type','category','description','amount','reference'],
-    'Pengaturan':['key','value']
-  };
-  SHEETS.forEach(n=>{
-    let sh=ss.getSheetByName(n);
-    if(!sh) sh=ss.insertSheet(n);
-    if(sh.getLastRow()===0) sh.getRange(1,1,1,headers[n].length).setValues([headers[n]]);
+  SHEETS.forEach(name=>{
+    let sh=ss.getSheetByName(name);
+    if(!sh) sh=ss.insertSheet(name);
+    ensureHeaders_(sh,HEADERS[name]);
     sh.setFrozenRows(1);
   });
   PropertiesService.getScriptProperties().setProperty('SETUP','1');
@@ -23,12 +25,22 @@ function setupDatabase(){
   return 'Database siap: '+SHEETS.join(', ');
 }
 
-function cors_(output){
-  return output.setMimeType(ContentService.MimeType.JSON);
+function ensureHeaders_(sh,headers){
+  if(sh.getLastRow()===0){
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+    return;
+  }
+  const current=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),headers.length)).getValues()[0];
+  const missing=headers.filter(h=>current.indexOf(h)===-1);
+  if(missing.length){
+    let start=Math.max(sh.getLastColumn(),1)+1;
+    sh.getRange(1,start,1,missing.length).setValues([missing]);
+  }
 }
-function json_(ok,data,error){
-  return cors_(ContentService.createTextOutput(JSON.stringify({ok,data:data||null,error:error||null})));
-}
+
+function cors_(output){ return output.setMimeType(ContentService.MimeType.JSON); }
+function json_(ok,data,error){ return cors_(ContentService.createTextOutput(JSON.stringify({ok,data:data||null,error:error||null}))); }
+
 function rows_(sheetName){
   const sh=ss_().getSheetByName(sheetName);
   if(!sh) throw Error('Sheet tidak ditemukan: '+sheetName);
@@ -37,6 +49,7 @@ function rows_(sheetName){
   const h=values[0];
   return values.slice(1).filter(r=>r.some(v=>v!=='')).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]])));
 }
+
 function dateStr_(v){
   if(v instanceof Date) return Utilities.formatDate(v,Session.getScriptTimeZone(),'yyyy-MM-dd');
   return String(v||'');
@@ -46,43 +59,82 @@ function timeStr_(v){
   return String(v||'');
 }
 function normalize_(d){
-  d.products=(d.products||[]).map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0)}));
+  d.products=(d.products||[]).map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0),photoUrl:String(x.photoUrl||'')}));
   d.transactions=(d.transactions||[]).map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),discount:Number(x.discount||0),total:Number(x.total||0),items:(x.items||[]).map(i=>({...i,price:Number(i.price||0),cost:Number(i.cost||0),qty:Number(i.qty||0)}))}));
   d.cashflows=(d.cashflows||[]).map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),amount:Number(x.amount||0)}));
   return d;
 }
+
 function bootstrap(){
   if(!PropertiesService.getScriptProperties().getProperty('SETUP')) setupDatabase();
-  const products=rows_('Produk').map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0)}));
+  const products=rows_('Produk').map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0),photoUrl:String(x.photoUrl||'')}));
   const tx=rows_('Transaksi');
   const detail=rows_('DetailTransaksi');
   const transactions=tx.map(t=>({...t,date:dateStr_(t.date),time:timeStr_(t.time),discount:Number(t.discount||0),total:Number(t.total||0),items:detail.filter(d=>String(d.transactionId)===String(t.id)).map(d=>({id:d.productId,name:d.name,price:Number(d.price||0),cost:Number(d.cost||0),qty:Number(d.qty||0)}))}));
   const cashflows=rows_('Kas').map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),amount:Number(x.amount||0)}));
   return normalize_({products,transactions,cashflows});
 }
+
 function findRow_(sh,id,col){
   const vals=sh.getDataRange().getValues();
   for(let i=1;i<vals.length;i++) if(String(vals[i][col-1])===String(id)) return i+1;
   return -1;
 }
+
 function saveProduct_(p){
+  if(!p || !p.id) throw Error('Data produk tidak valid');
   const sh=ss_().getSheetByName('Produk');
+  ensureHeaders_(sh,HEADERS.Produk);
   const row=findRow_(sh,p.id,1);
-  const data=[[p.id,p.name,p.category,Number(p.price),Number(p.cost),Number(p.stock),new Date()]];
-  if(row>0) sh.getRange(row,1,1,7).setValues(data); else sh.getRange(sh.getLastRow()+1,1,1,7).setValues(data);
+  let photoUrl=String(p.photoUrl||'');
+  if(!photoUrl && row>0 && sh.getLastColumn()>=8) photoUrl=String(sh.getRange(row,8).getValue()||'');
+  const data=[[p.id,String(p.name||''),String(p.category||''),Number(p.price||0),Number(p.cost||0),Number(p.stock||0),new Date(),photoUrl]];
+  if(row>0) sh.getRange(row,1,1,8).setValues(data);
+  else sh.getRange(sh.getLastRow()+1,1,1,8).setValues(data);
   return bootstrap();
 }
+
 function deleteProduct_(id){
   const sh=ss_().getSheetByName('Produk');
   const row=findRow_(sh,id,1);
   if(row>0) sh.deleteRow(row);
   return bootstrap();
 }
+
 function saveCashflow_(x){
   const sh=ss_().getSheetByName('Kas');
   sh.getRange(sh.getLastRow()+1,1,1,8).setValues([[x.id,x.date,x.time,x.type,x.category,x.description,Number(x.amount),x.reference||'']]);
   return bootstrap();
 }
+
+function getProductImageFolder_(){
+  const folders=DriveApp.getFoldersByName(PRODUCT_IMAGE_FOLDER);
+  return folders.hasNext()?folders.next():DriveApp.createFolder(PRODUCT_IMAGE_FOLDER);
+}
+
+function uploadProductPhoto_(data){
+  if(!data || !data.productId || !data.base64) throw Error('Data foto produk tidak lengkap');
+  const productId=String(data.productId);
+  const folder=getProductImageFolder_();
+  const bytes=Utilities.base64Decode(String(data.base64));
+  const mime=String(data.mimeType||'image/jpeg');
+  const safeName=String(data.fileName||('produk-'+productId+'.jpg')).replace(/[^a-zA-Z0-9._-]/g,'_');
+  const blob=Utilities.newBlob(bytes,mime,safeName);
+  const file=folder.createFile(blob);
+  try{ file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); }catch(e){}
+  const fileId=file.getId();
+  const photoUrl='https://drive.google.com/thumbnail?id='+encodeURIComponent(fileId)+'&sz=w800';
+
+  const sh=ss_().getSheetByName('Produk');
+  ensureHeaders_(sh,HEADERS.Produk);
+  const row=findRow_(sh,productId,1);
+  if(row<0) throw Error('Produk tidak ditemukan: '+productId);
+  sh.getRange(row,8).setValue(photoUrl);
+  sh.getRange(row,7).setValue(new Date());
+  SpreadsheetApp.flush();
+  return {photoUrl,productId};
+}
+
 function checkout_(t){
   const lock=LockService.getScriptLock();
   lock.waitLock(20000);
@@ -128,6 +180,7 @@ function doGet(e){
     return json_(false,null,'Action GET tidak dikenal: '+action);
   }catch(err){ return json_(false,null,err.message); }
 }
+
 function doPost(e){
   try{
     const body=JSON.parse((e.postData&&e.postData.contents)||'{}');
@@ -135,6 +188,7 @@ function doPost(e){
     if(!a) throw Error('Action wajib diisi');
     if(a==='setup') return json_(true,{message:setupDatabase()},null);
     if(a==='saveProduct') return json_(true,saveProduct_(body.product),null);
+    if(a==='uploadProductPhoto') return json_(true,uploadProductPhoto_(body),null);
     if(a==='deleteProduct') return json_(true,deleteProduct_(body.id),null);
     if(a==='saveCashflow') return json_(true,saveCashflow_(body.item),null);
     if(a==='checkout') return json_(true,checkout_(body.transaction),null);
