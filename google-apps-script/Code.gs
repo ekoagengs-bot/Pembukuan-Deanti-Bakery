@@ -1,7 +1,6 @@
 const SPREADSHEET_ID = '1PVBhZn2xhNGitRgjHCo5x3OUX0_DKsx1ZrS2KeN7CAQ';
 const SHEETS = ['Produk','Transaksi','DetailTransaksi','Kas','Pengaturan'];
 const PRODUCT_IMAGE_FOLDER = 'Deanti Bakery - Foto Produk';
-
 const HEADERS = {
   'Produk':['id','name','category','price','cost','stock','updatedAt','photoUrl'],
   'Transaksi':['id','no','date','time','method','discount','total','createdAt'],
@@ -9,189 +8,21 @@ const HEADERS = {
   'Kas':['id','date','time','type','category','description','amount','reference'],
   'Pengaturan':['key','value']
 };
-
-function ss_(){ return SpreadsheetApp.openById(SPREADSHEET_ID); }
-
-function setupDatabase(){
-  const ss=ss_();
-  SHEETS.forEach(name=>{
-    let sh=ss.getSheetByName(name);
-    if(!sh) sh=ss.insertSheet(name);
-    ensureHeaders_(sh,HEADERS[name]);
-    sh.setFrozenRows(1);
-  });
-  PropertiesService.getScriptProperties().setProperty('SETUP','1');
-  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID',SPREADSHEET_ID);
-  return 'Database siap: '+SHEETS.join(', ');
-}
-
-function ensureHeaders_(sh,headers){
-  if(sh.getLastRow()===0){
-    sh.getRange(1,1,1,headers.length).setValues([headers]);
-    return;
-  }
-  const current=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),headers.length)).getValues()[0];
-  const missing=headers.filter(h=>current.indexOf(h)===-1);
-  if(missing.length){
-    let start=Math.max(sh.getLastColumn(),1)+1;
-    sh.getRange(1,start,1,missing.length).setValues([missing]);
-  }
-}
-
-function cors_(output){ return output.setMimeType(ContentService.MimeType.JSON); }
-function json_(ok,data,error){ return cors_(ContentService.createTextOutput(JSON.stringify({ok,data:data||null,error:error||null}))); }
-
-function rows_(sheetName){
-  const sh=ss_().getSheetByName(sheetName);
-  if(!sh) throw Error('Sheet tidak ditemukan: '+sheetName);
-  const values=sh.getDataRange().getValues();
-  if(values.length<2) return [];
-  const h=values[0];
-  return values.slice(1).filter(r=>r.some(v=>v!=='')).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]])));
-}
-
-function dateStr_(v){
-  if(v instanceof Date) return Utilities.formatDate(v,Session.getScriptTimeZone(),'yyyy-MM-dd');
-  return String(v||'');
-}
-function timeStr_(v){
-  if(v instanceof Date) return Utilities.formatDate(v,Session.getScriptTimeZone(),'HH:mm');
-  return String(v||'');
-}
-function normalize_(d){
-  d.products=(d.products||[]).map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0),photoUrl:String(x.photoUrl||'')}));
-  d.transactions=(d.transactions||[]).map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),discount:Number(x.discount||0),total:Number(x.total||0),items:(x.items||[]).map(i=>({...i,price:Number(i.price||0),cost:Number(i.cost||0),qty:Number(i.qty||0)}))}));
-  d.cashflows=(d.cashflows||[]).map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),amount:Number(x.amount||0)}));
-  return d;
-}
-
-function bootstrap(){
-  if(!PropertiesService.getScriptProperties().getProperty('SETUP')) setupDatabase();
-  const products=rows_('Produk').map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0),photoUrl:String(x.photoUrl||'')}));
-  const tx=rows_('Transaksi');
-  const detail=rows_('DetailTransaksi');
-  const transactions=tx.map(t=>({...t,date:dateStr_(t.date),time:timeStr_(t.time),discount:Number(t.discount||0),total:Number(t.total||0),items:detail.filter(d=>String(d.transactionId)===String(t.id)).map(d=>({id:d.productId,name:d.name,price:Number(d.price||0),cost:Number(d.cost||0),qty:Number(d.qty||0)}))}));
-  const cashflows=rows_('Kas').map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),amount:Number(x.amount||0)}));
-  return normalize_({products,transactions,cashflows});
-}
-
-function findRow_(sh,id,col){
-  const vals=sh.getDataRange().getValues();
-  for(let i=1;i<vals.length;i++) if(String(vals[i][col-1])===String(id)) return i+1;
-  return -1;
-}
-
-function saveProduct_(p){
-  if(!p || !p.id) throw Error('Data produk tidak valid');
-  const sh=ss_().getSheetByName('Produk');
-  ensureHeaders_(sh,HEADERS.Produk);
-  const row=findRow_(sh,p.id,1);
-  let photoUrl=String(p.photoUrl||'');
-  if(!photoUrl && row>0 && sh.getLastColumn()>=8) photoUrl=String(sh.getRange(row,8).getValue()||'');
-  const data=[[p.id,String(p.name||''),String(p.category||''),Number(p.price||0),Number(p.cost||0),Number(p.stock||0),new Date(),photoUrl]];
-  if(row>0) sh.getRange(row,1,1,8).setValues(data);
-  else sh.getRange(sh.getLastRow()+1,1,1,8).setValues(data);
-  return bootstrap();
-}
-
-function deleteProduct_(id){
-  const sh=ss_().getSheetByName('Produk');
-  const row=findRow_(sh,id,1);
-  if(row>0) sh.deleteRow(row);
-  return bootstrap();
-}
-
-function saveCashflow_(x){
-  const sh=ss_().getSheetByName('Kas');
-  sh.getRange(sh.getLastRow()+1,1,1,8).setValues([[x.id,x.date,x.time,x.type,x.category,x.description,Number(x.amount),x.reference||'']]);
-  return bootstrap();
-}
-
-function getProductImageFolder_(){
-  const folders=DriveApp.getFoldersByName(PRODUCT_IMAGE_FOLDER);
-  return folders.hasNext()?folders.next():DriveApp.createFolder(PRODUCT_IMAGE_FOLDER);
-}
-
-function uploadProductPhoto_(data){
-  if(!data || !data.productId || !data.base64) throw Error('Data foto produk tidak lengkap');
-  const productId=String(data.productId);
-  const folder=getProductImageFolder_();
-  const bytes=Utilities.base64Decode(String(data.base64));
-  const mime=String(data.mimeType||'image/jpeg');
-  const safeName=String(data.fileName||('produk-'+productId+'.jpg')).replace(/[^a-zA-Z0-9._-]/g,'_');
-  const blob=Utilities.newBlob(bytes,mime,safeName);
-  const file=folder.createFile(blob);
-  try{ file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); }catch(e){}
-  const fileId=file.getId();
-  const photoUrl='https://drive.google.com/thumbnail?id='+encodeURIComponent(fileId)+'&sz=w800';
-
-  const sh=ss_().getSheetByName('Produk');
-  ensureHeaders_(sh,HEADERS.Produk);
-  const row=findRow_(sh,productId,1);
-  if(row<0) throw Error('Produk tidak ditemukan: '+productId);
-  sh.getRange(row,8).setValue(photoUrl);
-  sh.getRange(row,7).setValue(new Date());
-  SpreadsheetApp.flush();
-  return {photoUrl,productId};
-}
-
-function checkout_(t){
-  const lock=LockService.getScriptLock();
-  lock.waitLock(20000);
-  try{
-    const db=bootstrap();
-    const productsById=Object.fromEntries(db.products.map(p=>[String(p.id),p]));
-    t.items.forEach(i=>{
-      const p=productsById[String(i.id)];
-      if(!p) throw Error('Produk tidak ditemukan: '+i.name);
-      if(Number(p.stock)<Number(i.qty)) throw Error('Stok tidak cukup: '+i.name+' (tersisa '+p.stock+')');
-    });
-    const total=t.items.reduce((s,i)=>s+Number(i.price)*Number(i.qty),0)-Number(t.discount||0);
-    if(total<0) throw Error('Diskon tidak valid');
-    const ss=ss_();
-    const trx=ss.getSheetByName('Transaksi');
-    const det=ss.getSheetByName('DetailTransaksi');
-    const kas=ss.getSheetByName('Kas');
-    trx.getRange(trx.getLastRow()+1,1,1,8).setValues([[t.id,t.no,t.date,t.time,t.method,Number(t.discount||0),total,new Date()]]);
-    const details=t.items.map(i=>[t.id,i.id,i.name,Number(i.price),Number(i.cost),Number(i.qty),Number(i.price)*Number(i.qty)]);
-    if(details.length) det.getRange(det.getLastRow()+1,1,details.length,7).setValues(details);
-    const prod=ss.getSheetByName('Produk');
-    t.items.forEach(i=>{
-      const row=findRow_(prod,i.id,1);
-      if(row>0){
-        const stock=Number(prod.getRange(row,6).getValue()||0);
-        prod.getRange(row,6).setValue(stock-Number(i.qty));
-        prod.getRange(row,7).setValue(new Date());
-      }
-    });
-    kas.getRange(kas.getLastRow()+1,1,1,8).setValues([[t.id,t.date,t.time,'income','Penjualan',t.no,total,t.id]]);
-    SpreadsheetApp.flush();
-    return bootstrap();
-  }finally{
-    lock.releaseLock();
-  }
-}
-
-function doGet(e){
-  try{
-    const action=(e.parameter||{}).action||'bootstrap';
-    if(action==='ping') return json_(true,{message:'Deanti Bakery API aktif',spreadsheetId:SPREADSHEET_ID,time:new Date().toISOString()},null);
-    if(action==='bootstrap') return json_(true,bootstrap(),null);
-    return json_(false,null,'Action GET tidak dikenal: '+action);
-  }catch(err){ return json_(false,null,err.message); }
-}
-
-function doPost(e){
-  try{
-    const body=JSON.parse((e.postData&&e.postData.contents)||'{}');
-    const a=body.action;
-    if(!a) throw Error('Action wajib diisi');
-    if(a==='setup') return json_(true,{message:setupDatabase()},null);
-    if(a==='saveProduct') return json_(true,saveProduct_(body.product),null);
-    if(a==='uploadProductPhoto') return json_(true,uploadProductPhoto_(body),null);
-    if(a==='deleteProduct') return json_(true,deleteProduct_(body.id),null);
-    if(a==='saveCashflow') return json_(true,saveCashflow_(body.item),null);
-    if(a==='checkout') return json_(true,checkout_(body.transaction),null);
-    throw Error('Action tidak dikenal: '+a);
-  }catch(err){ return json_(false,null,err.message); }
-}
+function ss_(){return SpreadsheetApp.openById(SPREADSHEET_ID);}
+function setupDatabase(){const ss=ss_();SHEETS.forEach(name=>{let sh=ss.getSheetByName(name);if(!sh)sh=ss.insertSheet(name);ensureHeaders_(sh,HEADERS[name]);sh.setFrozenRows(1);});PropertiesService.getScriptProperties().setProperty('SETUP','1');PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID',SPREADSHEET_ID);return 'Database siap: '+SHEETS.join(', ');}
+function ensureHeaders_(sh,headers){if(sh.getLastRow()===0){sh.getRange(1,1,1,headers.length).setValues([headers]);return;}const current=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),headers.length)).getValues()[0];const missing=headers.filter(h=>current.indexOf(h)===-1);if(missing.length){let start=Math.max(sh.getLastColumn(),1)+1;sh.getRange(1,start,1,missing.length).setValues([missing]);}}
+function json_(ok,data,error){return ContentService.createTextOutput(JSON.stringify({ok,data:data||null,error:error||null})).setMimeType(ContentService.MimeType.JSON);}
+function rows_(name){const sh=ss_().getSheetByName(name);if(!sh)throw Error('Sheet tidak ditemukan: '+name);const values=sh.getDataRange().getValues();if(values.length<2)return [];const h=values[0];return values.slice(1).filter(r=>r.some(v=>v!=='')).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]])));}
+function dateStr_(v){if(v instanceof Date)return Utilities.formatDate(v,Session.getScriptTimeZone(),'yyyy-MM-dd');const s=String(v||'').trim();if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;const d=new Date(s);if(!isNaN(d.getTime()))return Utilities.formatDate(d,Session.getScriptTimeZone(),'yyyy-MM-dd');return s;}
+function timeStr_(v){if(v instanceof Date)return Utilities.formatDate(v,Session.getScriptTimeZone(),'HH:mm');const s=String(v||'').trim();const m=s.match(/(\d{1,2}):(\d{2})(?::\d{2})?/);return m?String(m[1]).padStart(2,'0')+':'+m[2]:s;}
+function normalize_(d){d.products=(d.products||[]).map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0),photoUrl:String(x.photoUrl||'')}));d.transactions=(d.transactions||[]).map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),discount:Number(x.discount||0),total:Number(x.total||0),items:(x.items||[]).map(i=>({...i,price:Number(i.price||0),cost:Number(i.cost||0),qty:Number(i.qty||0)}))}));d.cashflows=(d.cashflows||[]).map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),amount:Number(x.amount||0)}));return d;}
+function bootstrap(){if(!PropertiesService.getScriptProperties().getProperty('SETUP'))setupDatabase();const products=rows_('Produk').map(x=>({...x,price:Number(x.price||0),cost:Number(x.cost||0),stock:Number(x.stock||0),photoUrl:String(x.photoUrl||'')}));const tx=rows_('Transaksi');const detail=rows_('DetailTransaksi');const transactions=tx.map(t=>({...t,date:dateStr_(t.date),time:timeStr_(t.time),discount:Number(t.discount||0),total:Number(t.total||0),items:detail.filter(d=>String(d.transactionId)===String(t.id)).map(d=>({id:d.productId,name:d.name,price:Number(d.price||0),cost:Number(d.cost||0),qty:Number(d.qty||0)}))}));const cashflows=rows_('Kas').map(x=>({...x,date:dateStr_(x.date),time:timeStr_(x.time),amount:Number(x.amount||0)}));return normalize_({products,transactions,cashflows});}
+function findRow_(sh,id,col){const vals=sh.getDataRange().getValues();for(let i=1;i<vals.length;i++)if(String(vals[i][col-1])===String(id))return i+1;return -1;}
+function saveProduct_(p){if(!p||!p.id)throw Error('Data produk tidak valid');const sh=ss_().getSheetByName('Produk');ensureHeaders_(sh,HEADERS.Produk);const row=findRow_(sh,p.id,1);let photoUrl=String(p.photoUrl||'');if(!photoUrl&&row>0&&sh.getLastColumn()>=8)photoUrl=String(sh.getRange(row,8).getValue()||'');const data=[[p.id,String(p.name||''),String(p.category||''),Number(p.price||0),Number(p.cost||0),Number(p.stock||0),new Date(),photoUrl]];if(row>0)sh.getRange(row,1,1,8).setValues(data);else sh.getRange(sh.getLastRow()+1,1,1,8).setValues(data);return bootstrap();}
+function deleteProduct_(id){const sh=ss_().getSheetByName('Produk');const row=findRow_(sh,id,1);if(row>0)sh.deleteRow(row);return bootstrap();}
+function saveCashflow_(x){const sh=ss_().getSheetByName('Kas');sh.getRange(sh.getLastRow()+1,1,1,8).setValues([[x.id,x.date,x.time,x.type,x.category,x.description,Number(x.amount),x.reference||'']]);return bootstrap();}
+function getProductImageFolder_(){const folders=DriveApp.getFoldersByName(PRODUCT_IMAGE_FOLDER);return folders.hasNext()?folders.next():DriveApp.createFolder(PRODUCT_IMAGE_FOLDER);}
+function uploadProductPhoto_(data){if(!data||!data.productId||!data.base64)throw Error('Data foto produk tidak lengkap');const productId=String(data.productId);const folder=getProductImageFolder_();const bytes=Utilities.base64Decode(String(data.base64));const mime=String(data.mimeType||'image/jpeg');const safeName=String(data.fileName||('produk-'+productId+'.jpg')).replace(/[^a-zA-Z0-9._-]/g,'_');const file=folder.createFile(Utilities.newBlob(bytes,mime,safeName));try{file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);}catch(e){}const fileId=file.getId();const photoUrl='https://drive.google.com/thumbnail?id='+encodeURIComponent(fileId)+'&sz=w800';const sh=ss_().getSheetByName('Produk');ensureHeaders_(sh,HEADERS.Produk);const row=findRow_(sh,productId,1);if(row<0)throw Error('Produk tidak ditemukan: '+productId);sh.getRange(row,8).setValue(photoUrl);sh.getRange(row,7).setValue(new Date());SpreadsheetApp.flush();return {photoUrl,productId};}
+function checkout_(t){const lock=LockService.getScriptLock();lock.waitLock(20000);try{const db=bootstrap();const productsById=Object.fromEntries(db.products.map(p=>[String(p.id),p]));t.items.forEach(i=>{const p=productsById[String(i.id)];if(!p)throw Error('Produk tidak ditemukan: '+i.name);if(Number(p.stock)<Number(i.qty))throw Error('Stok tidak cukup: '+i.name+' (tersisa '+p.stock+')');});const total=t.items.reduce((s,i)=>s+Number(i.price)*Number(i.qty),0)-Number(t.discount||0);if(total<0)throw Error('Diskon tidak valid');const ss=ss_();const trx=ss.getSheetByName('Transaksi');const det=ss.getSheetByName('DetailTransaksi');const kas=ss.getSheetByName('Kas');trx.getRange(trx.getLastRow()+1,1,1,8).setValues([[t.id,t.no,t.date,t.time,t.method,Number(t.discount||0),total,new Date()]]);const details=t.items.map(i=>[t.id,i.id,i.name,Number(i.price),Number(i.cost),Number(i.qty),Number(i.price)*Number(i.qty)]);if(details.length)det.getRange(det.getLastRow()+1,1,details.length,7).setValues(details);const prod=ss.getSheetByName('Produk');t.items.forEach(i=>{const row=findRow_(prod,i.id,1);if(row>0){const stock=Number(prod.getRange(row,6).getValue()||0);prod.getRange(row,6).setValue(stock-Number(i.qty));prod.getRange(row,7).setValue(new Date());}});kas.getRange(kas.getLastRow()+1,1,1,8).setValues([[t.id,t.date,t.time,'income','Penjualan',t.no,total,t.id]]);SpreadsheetApp.flush();return bootstrap();}finally{lock.releaseLock();}}
+function doGet(e){try{const a=(e.parameter||{}).action||'bootstrap';if(a==='ping')return json_(true,{message:'Deanti Bakery API aktif',spreadsheetId:SPREADSHEET_ID,time:new Date().toISOString()},null);if(a==='bootstrap')return json_(true,bootstrap(),null);return json_(false,null,'Action GET tidak dikenal: '+a);}catch(err){return json_(false,null,err.message);}}
+function doPost(e){try{const body=JSON.parse((e.postData&&e.postData.contents)||'{}');const a=body.action;if(!a)throw Error('Action wajib diisi');if(a==='setup')return json_(true,{message:setupDatabase()},null);if(a==='saveProduct')return json_(true,saveProduct_(body.product),null);if(a==='uploadProductPhoto')return json_(true,uploadProductPhoto_(body),null);if(a==='deleteProduct')return json_(true,deleteProduct_(body.id),null);if(a==='saveCashflow')return json_(true,saveCashflow_(body.item),null);if(a==='checkout')return json_(true,checkout_(body.transaction),null);throw Error('Action tidak dikenal: '+a);}catch(err){return json_(false,null,err.message);}}
