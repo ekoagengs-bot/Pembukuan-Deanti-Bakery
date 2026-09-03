@@ -1,6 +1,7 @@
 (() => {
   const LAST_RECEIPT_KEY = 'deanti_bakery_last_receipt';
   const API_KEY = 'deanti_bakery_api_url';
+  const BAKERY_PHONE = '087780943397';
   const money = n => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(n)||0);
   const esc = v => String(v ?? '').replace(/[&<>\'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[m]));
   const apiUrl = () => localStorage.getItem(API_KEY) || '';
@@ -13,7 +14,7 @@
     const pay = Number(paid||0);
     return {
       id:String(t.id||''), no:String(t.no||''), date:String(t.date||''), time:String(t.time||''),
-      method:String(t.method||'Cash'),
+      method:String(t.method||'Cash'), customerName:String(t.customerName||''), customerPhone:String(t.customerPhone||''),
       items:items.map(i=>({name:String(i.name||''),qty:Number(i.qty||0),price:Number(i.price||0)})),
       subtotal, discount, total, paid:Math.max(pay,total), change:Math.max(0,pay-total)
     };
@@ -23,17 +24,16 @@
   function load(){ try{return JSON.parse(localStorage.getItem(LAST_RECEIPT_KEY)||'null')}catch(_){return null} }
 
   function ensureStyles(){
-    if(document.getElementById('receiptPrintStylesV2')) return;
+    if(document.getElementById('receiptPrintStylesV3')) return;
     const style=document.createElement('style');
-    style.id='receiptPrintStylesV2';
+    style.id='receiptPrintStylesV3';
     style.textContent=`
       .receipt-overlay{position:fixed;inset:0;background:rgba(20,14,10,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:99999}
       .receipt-dialog{width:min(430px,96vw);max-height:92vh;overflow:auto;background:#fff;border-radius:16px;box-shadow:0 20px 70px rgba(0,0,0,.28)}
       .receipt-dialog-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #eee;font-weight:700}
       .receipt-preview{padding:18px;background:#f4f4f4}
       .receipt-paper{width:80mm;max-width:100%;margin:0 auto;background:#fff;padding:6mm 4mm;color:#111;font:12px Arial,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.08)}
-      .receipt-paper h2{margin:0;text-align:center;font-size:20px}.receipt-paper .center{text-align:center}.receipt-paper .line{display:flex;justify-content:space-between;gap:10px;margin:5px 0}.receipt-paper .meta{border-top:1px dashed #888;border-bottom:1px dashed #888;padding:7px 0;margin:8px 0}.receipt-paper table{width:100%;border-collapse:collapse}.receipt-paper th,.receipt-paper td{padding:5px 0;border-bottom:1px dashed #bbb}.receipt-paper th{text-align:left;font-size:9px}.receipt-paper .right{text-align:right;white-space:nowrap}.receipt-paper .qty{text-align:center}.receipt-paper .total{border-top:1px solid #111;margin-top:8px;padding-top:8px;font-size:15px;font-weight:700}.receipt-paper .foot{text-align:center;margin-top:14px;font-size:10px}
-      .receipt-actions{display:flex;gap:8px;padding:14px 16px;border-top:1px solid #eee}.receipt-actions button{flex:1;padding:11px 14px;border-radius:10px;border:1px solid #ddd;font-weight:700;cursor:pointer}.receipt-actions .print-main{border:0;background:#b36a2c;color:#fff}
+      .receipt-paper h2{margin:0;text-align:center;font-size:20px}.receipt-paper .center{text-align:center}.receipt-paper .phone{font-weight:700;margin-top:3px}.receipt-paper .line{display:flex;justify-content:space-between;gap:10px;margin:5px 0}.receipt-paper .meta{border-top:1px dashed #888;border-bottom:1px dashed #888;padding:7px 0;margin:8px 0}.receipt-paper table{width:100%;border-collapse:collapse}.receipt-paper th,.receipt-paper td{padding:5px 0;border-bottom:1px dashed #bbb}.receipt-paper th{text-align:left;font-size:9px}.receipt-paper .right{text-align:right;white-space:nowrap}.receipt-paper .qty{text-align:center}.receipt-paper .total{border-top:1px solid #111;margin-top:8px;padding-top:8px;font-size:15px;font-weight:700}.receipt-paper .customer{font-size:11px;margin-top:5px}.receipt-paper .customer b{font-weight:700}.receipt-paper .foot{text-align:center;margin-top:16px;font-size:10px;line-height:1.5}.receipt-actions{display:flex;gap:8px;padding:14px 16px;border-top:1px solid #eee}.receipt-actions button{flex:1;padding:11px 14px;border-radius:10px;border:1px solid #ddd;font-weight:700;cursor:pointer}.receipt-actions .download-main{border:0;background:#b36a2c;color:#fff}.receipt-actions .print-secondary{border:0;background:#f1ede9;color:#4b382d}
       @media print{
         @page{size:80mm auto;margin:0}
         html,body{margin:0!important;padding:0!important;background:#fff!important}
@@ -54,21 +54,44 @@
     const cash = r.method.toLowerCase()==='cash'
       ? `<div class="line"><span>Bayar</span><b>${money(r.paid)}</b></div><div class="line"><span>Kembalian</span><b>${money(r.change)}</b></div>`
       : '';
-    return `<div class="receipt-paper"><h2>Deanti Bakery</h2><div class="center">Kasir & Pembukuan</div><div class="meta"><div class="line"><span>No. Transaksi</span><b>${esc(r.no)}</b></div><div class="line"><span>Tanggal</span><span>${esc(r.date)} ${esc(r.time)}</span></div><div class="line"><span>Pembayaran</span><span>${esc(r.method)}</span></div></div><table><thead><tr><th>Item</th><th class="qty">Qty</th><th class="right">Jumlah</th></tr></thead><tbody>${rows}</tbody></table><div class="line"><span>Subtotal</span><b>${money(r.subtotal)}</b></div><div class="line"><span>Diskon</span><b>${money(r.discount)}</b></div><div class="line total"><span>Total</span><b>${money(r.total)}</b></div>${cash}<div class="foot">Terima kasih telah berbelanja di Deanti Bakery.</div></div>`;
+    const customer = r.customerName ? `<div class="customer"><b>Pelanggan:</b> ${esc(r.customerName)}${r.customerPhone ? ` · ${esc(r.customerPhone)}` : ''}</div>` : '';
+    return `<div class="receipt-paper"><h2>Deanti Bakery</h2><div class="center">Kasir & Pembukuan</div><div class="center phone">No. HP: ${BAKERY_PHONE}</div><div class="meta"><div class="line"><span>No. Transaksi</span><b>${esc(r.no)}</b></div><div class="line"><span>Tanggal</span><span>${esc(r.date)} ${esc(r.time)}</span></div><div class="line"><span>Pembayaran</span><span>${esc(r.method)}</span></div>${customer}</div><table><thead><tr><th>Item</th><th class="qty">Qty</th><th class="right">Jumlah</th></tr></thead><tbody>${rows}</tbody></table><div class="line"><span>Subtotal</span><b>${money(r.subtotal)}</b></div><div class="line"><span>Diskon</span><b>${money(r.discount)}</b></div><div class="line total"><span>Total</span><b>${money(r.total)}</b></div>${cash}<div class="foot">Terima kasih telah berbelanja di Deanti Bakery.${r.customerName ? `<br>Terima kasih, ${esc(r.customerName)}!` : ''}</div></div>`;
   }
 
   function closePreview(){document.getElementById('receiptOverlay')?.remove()}
+
+  async function downloadJpeg(){
+    const paper=document.querySelector('#receiptOverlay .receipt-paper');
+    if(!paper)return;
+    if(typeof window.html2canvas!=='function'){
+      toast('Modul gambar belum siap. Coba lagi sebentar.');
+      return;
+    }
+    const button=document.getElementById('receiptDownload');
+    const old=button?.textContent;
+    if(button){button.disabled=true;button.textContent='Menyiapkan JPEG...';}
+    try{
+      const canvas=await window.html2canvas(paper,{scale:2,backgroundColor:'#fff',useCORS:true,allowTaint:false,logging:false,windowWidth:paper.scrollWidth,windowHeight:paper.scrollHeight});
+      const a=document.createElement('a');
+      const r=load()||{};
+      a.download=`Struk-Deanti-Bakery-${(r.no||'transaksi').replace(/[^a-zA-Z0-9_-]/g,'_')}.jpg`;
+      a.href=canvas.toDataURL('image/jpeg',0.95);
+      document.body.appendChild(a);a.click();a.remove();
+    }catch(e){console.error(e);toast('Gagal membuat JPEG struk');}
+    finally{if(button){button.disabled=false;button.textContent=old||'⬇️ Download JPEG';}}
+  }
 
   function showPreview(r){
     ensureStyles(); closePreview();
     const overlay=document.createElement('div');
     overlay.id='receiptOverlay';
     overlay.className='receipt-overlay';
-    overlay.innerHTML=`<div class="receipt-dialog"><div class="receipt-dialog-head"><span>Struk Transaksi</span><button id="receiptClose" type="button" style="border:0;background:transparent;font-size:20px;cursor:pointer">✕</button></div><div class="receipt-preview">${receiptHtml(r)}</div><div class="receipt-actions"><button id="receiptClose2" type="button">Tutup</button><button class="print-main" id="receiptPrint" type="button">🖨️ Cetak Struk</button></div></div>`;
+    overlay.innerHTML=`<div class="receipt-dialog"><div class="receipt-dialog-head"><span>Struk Transaksi</span><button id="receiptClose" type="button" style="border:0;background:transparent;font-size:20px;cursor:pointer">✕</button></div><div class="receipt-preview">${receiptHtml(r)}</div><div class="receipt-actions"><button id="receiptClose2" type="button">Tutup</button><button class="print-secondary" id="receiptPrint" type="button">🖨️ Cetak</button><button class="download-main" id="receiptDownload" type="button">⬇️ Download JPEG</button></div></div>`;
     document.body.appendChild(overlay);
     document.getElementById('receiptClose').onclick=closePreview;
     document.getElementById('receiptClose2').onclick=closePreview;
     document.getElementById('receiptPrint').onclick=()=>window.print();
+    document.getElementById('receiptDownload').onclick=downloadJpeg;
   }
 
   function captureCheckout(){
@@ -106,7 +129,7 @@
       b.style.marginTop='8px';
       payment.appendChild(b);
     }
-    b.textContent='🖨️ Cetak Struk Terakhir';
+    b.textContent='🧾 Lihat / Download Struk';
     b.onclick=()=>{const r=load(); if(r) showPreview(r); else toast('Belum ada transaksi yang bisa dicetak')};
   }
 
